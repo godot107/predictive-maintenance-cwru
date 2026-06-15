@@ -256,6 +256,8 @@ predictive-maintenance-pdm/
 │   └── app.py          # Streamlit dashboard
 ├── notebooks/
 │   └── 01_eda.ipynb    # exploratory data analysis (Medium-article backbone)
+├── blog/
+│   └── medium_article.md   # narrative write-up for Medium / a personal blog
 ├── data/               # downloaded .mat files (git-ignored)
 ├── models/             # trained weights (git-ignored)
 ├── reports/            # generated figures (key ones committed for the README)
