@@ -1,0 +1,5 @@
+# Extra deps for the EDA notebook (not needed to run the app/model).
+-r requirements.txt
+jupyterlab
+nbconvert
+seaborn
