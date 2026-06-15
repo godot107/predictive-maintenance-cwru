@@ -11,6 +11,12 @@
   <img alt="CUDA"       src="https://img.shields.io/badge/CUDA-enabled-76B900?logo=nvidia&logoColor=white">
 </p>
 
+<p align="center">
+  <img src="reports/dashboard_fault.png" alt="Streamlit dashboard diagnosing an inner-race bearing fault" width="100%">
+  <br>
+  <sub>The Streamlit dashboard running <b>live GPU inference</b>: raw signal → FFT → spectrogram → CNN diagnosis, with plain-language analogies.</sub>
+</p>
+
 ---
 
 ## 🏭 The Problem — Why Predictive Maintenance?

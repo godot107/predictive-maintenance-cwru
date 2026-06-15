@@ -10,6 +10,8 @@ reports/*
 !reports/eda_tsne.png
 !reports/eda_envelope.png
 !reports/eda_avg_fft.png
+!reports/dashboard.png
+!reports/dashboard_fault.png
 
 # Python
 __pycache__/

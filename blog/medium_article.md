@@ -80,6 +80,8 @@ I wired it up in PyTorch, trained on an NVIDIA GPU, and wrapped it in a Streamli
 dashboard that shows the raw signal, the FFT, the spectrogram, and the model's live
 verdict. It worked. The test accuracy came back at **100%**.
 
+![The Streamlit dashboard diagnosing an inner-race fault](https://raw.githubusercontent.com/godot107/predictive-maintenance-cwru/main/reports/dashboard_fault.png)
+
 And that's where the project got interesting.
 
 ---
