@@ -53,10 +53,20 @@ st.caption(
     "PyTorch 2-D CNN — CWRU Bearing Dataset."
 )
 
-# Guard rails: data + model must exist.
+# Guard rails: ensure the dataset + model are present. On a fresh deploy (e.g.
+# Streamlit Community Cloud) the .mat files aren't in the repo, so fetch them
+# automatically on first run; the trained weights ship with the repo.
 data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 if not os.path.exists(os.path.join(data_dir, "97.mat")):
-    st.error("Dataset not found. Run `python src/downloader.py` first.")
+    from downloader import download_dataset  # noqa: E402
+
+    with st.spinner("First run: downloading the CWRU dataset (~12 MB)…"):
+        download_dataset()
+if not os.path.exists(os.path.join(data_dir, "97.mat")):
+    st.error(
+        "Could not download the CWRU dataset — the data server may be temporarily "
+        "unavailable. Try reloading in a few minutes."
+    )
     st.stop()
 if not os.path.exists(MODEL_PATH):
     st.error("Trained model not found. Run `python src/model.py` first.")

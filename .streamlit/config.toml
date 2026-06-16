@@ -1,0 +1,8 @@
+# Streamlit theme (matches the README/dashboard palette). Server settings are
+# managed by Streamlit Community Cloud at deploy time; this file just styles the UI.
+[theme]
+primaryColor = "#d95f0e"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f7fa"
+textColor = "#1a1a1a"
+font = "sans serif"
