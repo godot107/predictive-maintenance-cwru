@@ -14,6 +14,7 @@ reports/*
 !reports/eda_avg_fft.png
 !reports/dashboard.png
 !reports/dashboard_fault.png
+!reports/cnn_architecture.png
 
 # Python
 __pycache__/

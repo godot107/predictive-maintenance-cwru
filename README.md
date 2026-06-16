@@ -17,6 +17,10 @@
   <sub>The Streamlit dashboard running <b>live GPU inference</b>: raw signal → FFT → spectrogram → CNN diagnosis, with plain-language analogies.</sub>
 </p>
 
+> 📖 **Prefer the story?** Read the narrative write-up —
+> **[“Teaching a Neural Network to Hear a Failing Bearing”](blog/medium_article.md)**
+> (why hitting 100% accuracy made me trust the model *less*).
+
 ---
 
 ## 🏭 The Problem — Why Predictive Maintenance?
@@ -134,7 +138,7 @@ about the exact spectrogram dimensions — change the STFT settings and it still
 
 Before reaching for a bigger model, **understand the signal**. The full analysis
 lives in **[`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb)** (the backbone of the
-Medium article); highlights:
+[narrative article](blog/medium_article.md)); highlights:
 
 - **Descriptive:** faults are *impulsive* — visible as periodic spikes, fat-tailed
   amplitude distributions, and extra high-frequency energy vs the smooth Normal trace.

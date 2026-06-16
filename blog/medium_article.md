@@ -53,6 +53,26 @@ smoothie and it hands back the ingredients — *"30% strawberry, 50% banana, 20%
 spinach."* For a bearing, those ingredients are **frequencies**, and a fault adds a
 specific new "flavour" that shouldn't be there.
 
+#### How it works in code (and physics)
+
+Physically, when a bearing is healthy, it hums along at a smooth, predictable baseline. But when a crack forms on the inner race, every time a ball bearing rolls over that crack, it creates a tiny microscopic "click" or impact. Because the motor is spinning at a constant speed, these clicks happen at a very regular interval (a specific frequency). 
+
+The FFT takes the messy, noisy vibration wave and mathematically isolates that exact repeating "click", plotting it as a giant spike on a graph. In Python, isolating these frequencies is incredibly elegant using NumPy's real-valued FFT (`rfft`):
+
+```python
+import numpy as np
+
+# 'segment' is a slice of our raw vibration array
+# 'fs' is our sampling rate (12,000 Hz)
+n = len(segment)
+
+# 1. Get the X-axis (the exact frequency values in Hz)
+frequencies_hz = np.fft.rfftfreq(n, d=1.0 / fs)
+
+# 2. Get the Y-axis (the magnitude/loudness of each frequency)
+magnitude = np.abs(np.fft.rfft(segment)) * (2.0 / n)
+```
+
 Average the FFT across many windows and the fingerprints jump out — the faults light
 up high-frequency bands the healthy bearing never touches:
 
@@ -70,11 +90,66 @@ single frequency — it's a *pattern of impacts repeating over time*, exactly th
 of 2-D structure a **Convolutional Neural Network** (the tech that recognizes cats in
 photos) is built to spot.
 
-So the pipeline became:
+So the high-level pipeline became:
 
-```
+```text
 Raw vibration  ─▶  Spectrogram  ─▶  2-D CNN (on GPU)  ─▶  Fault diagnosis
 ```
+
+#### Under the Hood: The CNN Architecture
+
+To make the "2-D CNN" step concrete, here is the exact dataflow of the model. It's a lightweight, 3-block architecture (only ~155,000 parameters) that uses an Adaptive Average Pooling layer. This pooling layer is a crucial design choice: it forces the feature map to a fixed 4x4 size before the classifier, meaning the network won't break if you feed it slightly different sized spectrograms.
+
+```mermaid
+graph TD
+    Input["Input Spectrogram (1 Channel)"] --> B1
+
+    subgraph Block 1
+        B1["Conv2d (1 → 16 channels)"] --> BN1["BatchNorm2d"]
+        BN1 --> R1["ReLU"]
+        R1 --> M1["MaxPool2d"]
+    end
+
+    M1 --> B2
+
+    subgraph Block 2
+        B2["Conv2d (16 → 32 channels)"] --> BN2["BatchNorm2d"]
+        BN2 --> R2["ReLU"]
+        R2 --> M2["MaxPool2d"]
+    end
+
+    M2 --> B3
+
+    subgraph Block 3
+        B3["Conv2d (32 → 64 channels)"] --> BN3["BatchNorm2d"]
+        BN3 --> R3["ReLU"]
+        R3 --> M3["MaxPool2d"]
+    end
+
+    M3 --> GAP["AdaptiveAvgPool2d (4x4)"]
+    GAP -. "Forces shape to (64, 4, 4)" .-> Flat["Flatten"]
+    
+    Flat --> Drop["Dropout (p=0.3)"]
+    
+    subgraph Classifier
+        Drop --> L1["Linear (1024 → 128)"]
+        L1 --> R4["ReLU"]
+        R4 --> L2["Linear (128 → 4 classes)"]
+    end
+    
+    L2 --> Out["Output: Fault Predictions"]
+```
+
+<!-- Publishing to Medium? Medium can't render Mermaid — paste the exported image
+     instead: reports/cnn_architecture.png (regenerate any time via mermaid.ink). -->
+
+**Design Consideration: Avoiding the "Matrix Mismatch" Error**
+
+If you are new to building CNNs, the hardest part is usually preventing `RuntimeError: shape cannot be multiplied` when transitioning from Convolutional layers to Linear layers. This architecture solves that using two rules:
+1. **The Plumbing Rule:** When stacking `Conv2d` layers, only the *channels* (depth) need to connect perfectly. Notice how Block 1 outputs 16 channels, and Block 2 takes in 16 channels. It's like plumbing—the output pipes must match the input valves.
+2. **The "Cheat Code" (Adaptive Pooling):** `MaxPool2d` halves the height and width of the spectrogram at every block. Normally, you have to manually calculate the exact final grid size to feed into the `Linear` layer. If your input image changes size, the math breaks and the code crashes. By inserting `AdaptiveAvgPool2d((4, 4))` right before flattening, we tell PyTorch: *"I don't care what the height and width are at this point. Mathematically squish whatever you have into a 4x4 grid."* This permanently locks our flattened size to exactly 64 channels × 4 × 4 = 1024, completely eliminating shape mismatch errors.
+
+> ***Academic Credit:** The math that makes "Adaptive Pooling" possible—allowing CNNs to accept images of any size without breaking the fully connected layers—was pioneered by Kaiming He et al. in the landmark 2014 paper [Spatial Pyramid Pooling in Deep Convolutional Networks for Visual Recognition](https://arxiv.org/abs/1406.4729). Furthermore, the practice of heavily pooling spatial dimensions to drastically reduce the parameter count of Linear layers was famously introduced by Lin et al. in the 2013 paper [Network In Network](https://arxiv.org/abs/1312.4400).*
 
 I wired it up in PyTorch, trained on an NVIDIA GPU, and wrapped it in a Streamlit
 dashboard that shows the raw signal, the FFT, the spectrogram, and the model's live
@@ -177,10 +252,23 @@ That last part is the heart of an **AI Solutioning Consultant's** job: translati
 between the business problem ("don't let the compressor fail") and the technical
 reality ("here's what the data can and can't tell us, and here's how I know").
 
-The honest next step — the genuinely *hard* benchmark — is **cross-load
-generalization**: train on some motor loads and test on a load the model has never
-seen. That's where accuracy drops to a realistic number and the real engineering
-begins. It's the next milestone in the repo.
+So I ran the benchmark I'd been saving for last — the genuinely *hard* one:
+**cross-load generalization**. CWRU recorded each fault at four motor loads, so I
+trained on three and tested on a load the model had never seen — a true change of
+operating condition, not just a clean split. I expected the accuracy to finally crack.
+
+It didn't. Leave-one-load-out held at **1.000 ± 0.000**, and even training on a
+*single* load and testing on the most distant one stayed at **0.998**. The physics
+explains it: a defect's frequencies are fixed by the bearing's *geometry*, which
+barely shifts across this ~4% speed range, while the per-window normalization removes
+the amplitude changes the load *does* cause. What survives is the fault-frequency
+*pattern* — exactly what the CNN keys on. Load transfer simply isn't the bottleneck
+for naming the fault *type*.
+
+So the genuinely open problems lie elsewhere: **severity grading** (telling a 0.007″
+defect from a 0.021″ one of the *same* fault type) and noisy, multi-fault field data.
+Knowing *where* the difficulty actually lives — and where it doesn't — turned out to be
+the most useful thing the whole exercise produced. It's the next milestone in the repo.
 
 ---
 
@@ -193,3 +281,17 @@ begins. It's the next milestone in the repo.
 If you take one thing from this: when your model scores 100%, don't celebrate —
 *investigate*. The most valuable result in this whole project was the one that looked
 too good to be true.
+
+---
+
+## Appendix: Glossary of Terms
+
+If you're new to the signal processing or machine learning terminology used in this article, here is a quick guide to help clarify the concepts:
+
+- **Predictive Maintenance (PdM)**: The practice of continuously monitoring equipment condition (like vibration or temperature) to predict when it will fail. This allows maintenance to be scheduled right before failure, avoiding both unexpected breakdowns and unnecessary routine part replacements.
+- **Fast Fourier Transform (FFT)**: A mathematical algorithm that takes a raw signal measured over time (like a complex vibration wave) and breaks it down into the individual frequencies that make it up. Think of it as a recipe that tells you exactly how much of each "pitch" is in a sound.
+- **Spectrogram**: A visual representation of frequencies as they change over time. If an FFT gives you the specific notes played in a single chord, a spectrogram is the sheet music for the entire song, showing when each note is played and how loud it is.
+- **Data Leakage**: A fundamental mistake in machine learning where the model accidentally has access to the test data during training. In this project's initial approach, overlapping time windows were randomly split, meaning near-identical slices ended up in both the training and test sets. The model essentially "memorized" the answers rather than learning to generalize.
+- **t-SNE (t-Distributed Stochastic Neighbor Embedding)**: A technique used to visualize highly complex data by grouping similar data points together on a 2D map. In this article, it visually proves that the different bearing faults are so mathematically distinct that they form their own isolated "islands," explaining why the model easily scored 100%.
+- **Envelope Analysis (Demodulation)**: A signal processing technique that strips away the loud, high-frequency "carrier" noise of a machine to isolate and reveal the quieter, lower-frequency repeating impacts—such as a bearing ball repeatedly hitting a crack on the inner race.
+- **Cross-load Generalization (Cross-load Benchmark)**: The process of training a model on data from a machine operating under one set of conditions (e.g., a 1 horsepower load) and testing it on data from a different condition (e.g., 2 or 3 horsepower). Because machine vibrations inherently change under different physical loads, testing "cross-load" proves whether the model actually learned the physics of a failure, or if it just overfit to the exact sound of a 1 HP motor.
