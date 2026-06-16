@@ -5,6 +5,7 @@ Train on the (leakage-free) CWRU dataset and save weights to
 
     python src/model.py --epochs 50            # train with early stopping
     python src/model.py --cv 5                 # 5-fold cross-validation
+    python src/model.py --cross-load           # leave-one-load-out generalization
     python src/model.py --split random         # leaky baseline, for comparison
 
 Training targets CUDA automatically when a GPU is available.
@@ -23,8 +24,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from preprocess import build_cv_folds, build_dataset  # noqa: E402
-from downloader import LABEL_NAMES, PROJECT_ROOT  # noqa: E402
+from preprocess import build_cross_load_split, build_cv_folds, build_dataset  # noqa: E402
+from downloader import LABEL_NAMES, LOADS, PROJECT_ROOT  # noqa: E402
 
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 MODEL_PATH = os.path.join(MODELS_DIR, "bearing_cnn.pth")
@@ -213,6 +214,72 @@ def cross_validate(
     return accuracies
 
 
+@torch.no_grad()
+def _predict_all(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+    """Return (y_true, y_pred) arrays over a loader."""
+    model.eval()
+    ys, ps = [], []
+    for xb, yb in loader:
+        ps.append(model(xb.to(device)).argmax(dim=1).cpu().numpy())
+        ys.append(yb.numpy())
+    return np.concatenate(ys), np.concatenate(ps)
+
+
+def cross_load_validate(
+    epochs: int = 30,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+) -> list[float]:
+    """Leave-one-load-out cross-load generalization benchmark.
+
+    For each motor load, train on the *other* loads and test on the held-out
+    load — the model must generalize to an RPM/load it never saw during training.
+    This is the genuinely hard, deployment-relevant benchmark: unlike the
+    single-condition CV (which nears 100%), here train and test signals come from
+    physically different operating conditions. Prints per-load accuracy, per-class
+    recall, and the mean±std across folds.
+    """
+    torch.manual_seed(42)
+    device = get_device()
+    print(f"Device: {device} | leave-one-load-out across loads {LOADS} HP")
+    criterion = nn.CrossEntropyLoss()
+    accuracies = []
+
+    for held in LOADS:
+        train_loads = [ld for ld in LOADS if ld != held]
+        X_tr, y_tr, X_te, y_te = build_cross_load_split(train_loads, [held])
+        train_loader = _to_loader(X_tr, y_tr, batch_size, shuffle=True)
+        test_loader = _to_loader(X_te, y_te, batch_size, shuffle=False)
+
+        model = BearingCNN().to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        for _ in range(epochs):
+            model.train()
+            for xb, yb in train_loader:
+                xb, yb = xb.to(device), yb.to(device)
+                optimizer.zero_grad()
+                criterion(model(xb), yb).backward()
+                optimizer.step()
+
+        y_true, y_pred = _predict_all(model, test_loader, device)
+        acc = float((y_true == y_pred).mean())
+        accuracies.append(acc)
+
+        recalls = []
+        for c in range(NUM_CLASSES):
+            mask = y_true == c
+            recalls.append(float((y_pred[mask] == c).mean()) if mask.any() else float("nan"))
+        rec_str = "  ".join(f"{LABEL_NAMES[c]}={recalls[c]:.2f}" for c in range(NUM_CLASSES))
+        print(f"  Hold-out load {held} HP: acc {acc:.3f}  (train n={len(y_tr)}, test n={len(y_te)})")
+        print(f"      per-class recall: {rec_str}")
+
+    arr = np.array(accuracies)
+    print("-" * 64)
+    print(f"Cross-load (leave-one-load-out) accuracy: {arr.mean():.3f} ± {arr.std():.3f}")
+    return accuracies
+
+
 def load_model(path: str = MODEL_PATH, device: torch.device | None = None) -> BearingCNN:
     """Instantiate ``BearingCNN`` and load trained weights."""
     device = device or get_device()
@@ -246,9 +313,15 @@ if __name__ == "__main__":
                         help="temporal = leakage-free (default); random = leaky baseline")
     parser.add_argument("--cv", type=int, metavar="K", default=0,
                         help="run K-fold cross-validation instead of a single train run")
+    parser.add_argument("--cross-load", action="store_true",
+                        help="run the leave-one-load-out cross-load generalization benchmark "
+                             "(requires `python src/downloader.py --all-loads`)")
     args = parser.parse_args()
 
-    if args.cv:
+    if args.cross_load:
+        cross_load_validate(epochs=args.epochs if args.epochs != 50 else 30,
+                            batch_size=args.batch_size, lr=args.lr, weight_decay=args.weight_decay)
+    elif args.cv:
         cross_validate(n_splits=args.cv, epochs=args.epochs, batch_size=args.batch_size,
                        lr=args.lr, weight_decay=args.weight_decay)
     else:

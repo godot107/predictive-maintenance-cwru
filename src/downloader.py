@@ -8,7 +8,8 @@ in numpy/scipy.
 Case Western Reserve University (CWRU) Bearing Data Center:
     https://engineering.case.edu/bearingdatacenter
 
-We use four 12 kHz Drive-End (DE) recordings, each representing one health state:
+We use four 12 kHz Drive-End (DE) recordings, each representing one health state.
+At the default motor load (0 HP, ~1797 RPM) those are:
 
     file | fault class | fault diameter | label
     -----+-------------+----------------+------
@@ -17,9 +18,15 @@ We use four 12 kHz Drive-End (DE) recordings, each representing one health state
     118  | Ball        | 0.007"         | 2
     130  | Outer Race  | 0.007"         | 3
 
-Run directly to fetch everything into ``data/``::
+CWRU also recorded each condition at motor loads of 1, 2 and 3 HP (different
+RPMs). The full 4-class x 4-load registry lives in ``LOAD_FILES`` and powers the
+*cross-load generalization* benchmark (train on some loads, test on an unseen
+load). ``FILES`` is the 0 HP subset used by the default single-condition pipeline.
 
-    python src/downloader.py
+Run directly to fetch the default 4 files into ``data/``::
+
+    python src/downloader.py             # 4 files (load 0 only)
+    python src/downloader.py --all-loads # all 16 files (cross-load benchmark)
 """
 
 from __future__ import annotations
@@ -35,17 +42,44 @@ PROJECT_ROOT = os.path.dirname(SRC_DIR)
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 # --- Dataset registry --------------------------------------------------------
-# ``label`` is the integer the model learns; ``fault`` is the human-readable
-# name; ``de_key`` is the expected MATLAB variable holding the Drive-End signal.
-FILES = [
-    {"file_id": "97",  "label": 0, "fault": "Normal",     "de_key": "X097_DE_time"},
-    {"file_id": "105", "label": 1, "fault": "Inner Race", "de_key": "X105_DE_time"},
-    {"file_id": "118", "label": 2, "fault": "Ball",       "de_key": "X118_DE_time"},
-    {"file_id": "130", "label": 3, "fault": "Outer Race", "de_key": "X130_DE_time"},
+# Full 4-class x 4-load registry (0.007" faults, 12 kHz Drive-End). ``label`` is
+# the integer the model learns; ``fault`` is the human-readable name; ``load`` is
+# the motor load in HP (0/1/2/3 -> ~1797/1772/1750/1730 RPM). The Drive-End
+# MATLAB variable name (``de_key``) is derived: file 97 -> ``X097_DE_time``.
+#
+#            load 0   load 1   load 2   load 3
+#   Normal      97       98       99      100
+#   Inner Race 105      106      107      108
+#   Ball       118      119      120      121
+#   Outer Race 130      131      132      133
+_REGISTRY = [
+    # (fault, label, [file_id per load 0, 1, 2, 3])
+    ("Normal",     0, ["97",  "98",  "99",  "100"]),
+    ("Inner Race", 1, ["105", "106", "107", "108"]),
+    ("Ball",       2, ["118", "119", "120", "121"]),
+    ("Outer Race", 3, ["130", "131", "132", "133"]),
 ]
+
+LOAD_FILES = [
+    {
+        "file_id": file_id,
+        "label": label,
+        "fault": fault,
+        "load": load,
+        "de_key": f"X{int(file_id):03d}_DE_time",
+    }
+    for fault, label, ids in _REGISTRY
+    for load, file_id in enumerate(ids)
+]
+
+# The default single-condition dataset: the 0 HP subset, ordered by label.
+FILES = [f for f in LOAD_FILES if f["load"] == 0]
 
 # Ordered by label index -> name. Used everywhere for display.
 LABEL_NAMES = [f["fault"] for f in sorted(FILES, key=lambda f: f["label"])]
+
+# Distinct motor loads available in the cross-load registry.
+LOADS = sorted({f["load"] for f in LOAD_FILES})
 
 # Sampling rate of the 12k Drive-End recordings (Hz).
 SAMPLING_RATE = 12_000
@@ -101,19 +135,24 @@ def _download_one(file_id: str, dest: str) -> bool:
     return False
 
 
-def download_dataset(data_dir: str = DATA_DIR) -> dict[str, str]:
-    """Download every file in ``FILES`` into ``data_dir`` (skips existing).
+def download_dataset(data_dir: str = DATA_DIR, files: list[dict] | None = None) -> dict[str, str]:
+    """Download every entry in ``files`` into ``data_dir`` (skips existing).
 
-    Returns a mapping of ``file_id -> local path`` for the files now present.
+    ``files`` defaults to ``FILES`` (the 4 load-0 recordings); pass ``LOAD_FILES``
+    to fetch all 16 for the cross-load benchmark. Returns a mapping of
+    ``file_id -> local path`` for the files now present.
     """
+    files = FILES if files is None else files
     os.makedirs(data_dir, exist_ok=True)
     paths: dict[str, str] = {}
     failures: list[str] = []
 
-    for entry in FILES:
+    for entry in files:
         file_id = entry["file_id"]
         dest = os.path.join(data_dir, f"{file_id}.mat")
-        label = f"{entry['fault']} ({file_id}.mat)"
+        load = entry.get("load")
+        suffix = f", load {load} HP" if load is not None else ""
+        label = f"{entry['fault']}{suffix} ({file_id}.mat)"
 
         if os.path.exists(dest) and _looks_like_mat(dest):
             print(f"[skip] {label} already present")
@@ -127,7 +166,7 @@ def download_dataset(data_dir: str = DATA_DIR) -> dict[str, str]:
             failures.append(label)
 
     print("-" * 60)
-    print(f"Ready: {len(paths)}/{len(FILES)} files in {data_dir}")
+    print(f"Ready: {len(paths)}/{len(files)} files in {data_dir}")
     if failures:
         print("Could not download:", ", ".join(failures))
         print(
@@ -140,5 +179,16 @@ def download_dataset(data_dir: str = DATA_DIR) -> dict[str, str]:
 
 
 if __name__ == "__main__":
-    result = download_dataset()
-    sys.exit(0 if len(result) == len(FILES) else 1)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Download the CWRU bearing dataset.")
+    parser.add_argument(
+        "--all-loads", action="store_true",
+        help="download all 16 files (4 classes x 4 motor loads) for the "
+             "cross-load benchmark, not just the 4 load-0 recordings",
+    )
+    args = parser.parse_args()
+
+    files = LOAD_FILES if args.all_loads else FILES
+    result = download_dataset(files=files)
+    sys.exit(0 if len(result) == len(files) else 1)

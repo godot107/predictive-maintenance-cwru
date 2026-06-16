@@ -36,7 +36,7 @@ from scipy.signal import spectrogram as scipy_spectrogram
 from sklearn.model_selection import train_test_split
 
 # Registry + paths come from the (dependency-free) downloader module.
-from downloader import DATA_DIR, FILES, LABEL_NAMES, SAMPLING_RATE
+from downloader import DATA_DIR, FILES, LABEL_NAMES, LOAD_FILES, SAMPLING_RATE
 
 # --- Transform parameters (single source of truth) ---------------------------
 SEGMENT_LENGTH = 2048      # samples per window (~0.17 s at 12 kHz)
@@ -321,6 +321,48 @@ def build_cv_folds(
         X_te, _, y_te = _assemble(te_raw, balance=False, rng=rng)
         folds.append((X_tr, y_tr, X_te, y_te))
     return folds
+
+
+def build_cross_load_split(
+    train_loads,
+    test_loads,
+    data_dir: str = DATA_DIR,
+    segment_length: int = SEGMENT_LENGTH,
+    overlap: float = SEGMENT_OVERLAP,
+    balance: bool = True,
+):
+    """Build a cross-load generalization split from the ``LOAD_FILES`` registry.
+
+    Train segments come from the recordings at ``train_loads`` (motor loads in
+    HP); test segments come from the *unseen* ``test_loads``. Because train and
+    test are physically different recordings (different RPM/load), no window is
+    shared — this is the genuinely hard, deployment-relevant benchmark.
+
+    Returns ``(X_train, y_train, X_test, y_test)`` with spectrograms of shape
+    ``(N, H, W)`` and integer labels. Each class is balanced (truncated to the
+    smallest class) independently within train and within test.
+    """
+    train_loads, test_loads = set(train_loads), set(test_loads)
+    rng = np.random.default_rng(RANDOM_STATE)
+
+    def collect(loads: set) -> tuple[np.ndarray, np.ndarray]:
+        per_class: dict[int, list] = {}
+        for entry in LOAD_FILES:
+            if entry["load"] not in loads:
+                continue
+            path = os.path.join(data_dir, f"{entry['file_id']}.mat")
+            if not os.path.exists(path):
+                raise FileNotFoundError(
+                    f"Missing {path}. Run `python src/downloader.py --all-loads` first."
+                )
+            segs = segment_signal(load_signal(path), segment_length, overlap)
+            per_class.setdefault(entry["label"], []).append(segs)
+        X, _, y = _assemble(per_class, balance, rng)
+        return X, y
+
+    X_train, y_train = collect(train_loads)
+    X_test, y_test = collect(test_loads)
+    return X_train, y_train, X_test, y_test
 
 
 if __name__ == "__main__":
