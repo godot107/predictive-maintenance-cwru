@@ -10,15 +10,19 @@ Raw vibration signal → STFT spectrogram → 2-D CNN → fault class
 (Normal / Inner Race / Ball / Outer Race), surfaced in a Streamlit dashboard.
 
 ## Layout
-- `src/downloader.py` — fetches the four CWRU 12k Drive-End `.mat` files. **Single
-  source of truth for the dataset registry** (`FILES`, `LABEL_NAMES`, sampling rate).
-  Stdlib-only so it imports cheaply everywhere.
+- `src/downloader.py` — fetches the CWRU 12k Drive-End `.mat` files. **Single
+  source of truth for the dataset registry**: `LOAD_FILES` (all 16 = 4 classes ×
+  4 motor loads) is the superset; `FILES` (the load-0 subset), `LABEL_NAMES`,
+  `LOADS`, sampling rate are derived from it. `python src/downloader.py` grabs the
+  4 load-0 files; `--all-loads` grabs all 16. Stdlib-only so it imports cheaply.
 - `src/preprocess.py` — load DE channel, segment, FFT, STFT spectrogram, normalise,
   **leakage-free** splits. **Single source of truth for transform params**
   (`SEGMENT_LENGTH`, `FS`, `STFT_NPERSEG`, `STFT_NOVERLAP`). `build_dataset(split_strategy=
-  "temporal"|"random")` + `build_cv_folds()`.
+  "temporal"|"random")`, `build_cv_folds()`, and `build_cross_load_split(train_loads,
+  test_loads)` (physically different recordings → genuine distribution shift).
 - `src/model.py` — `BearingCNN`, training loop with **val + early stopping**,
-  `cross_validate()`, `load_model`/`predict` helpers.
+  `cross_validate()`, `cross_load_validate()` (leave-one-load-out), `load_model`/
+  `predict` helpers.
 - `src/evaluate.py` — confusion matrix + per-class precision/recall/F1, saves
   `reports/confusion_matrix.png`.
 - `src/features.py` — engineered vibration features (RMS, kurtosis, crest factor…)
@@ -35,9 +39,11 @@ Raw vibration signal → STFT spectrogram → 2-D CNN → fault class
 ```bash
 python -m venv .venv && source .venv/bin/activate   # project-local env (torch is heavy)
 pip install -r requirements.txt
-python src/downloader.py          # download dataset -> data/
+python src/downloader.py          # download dataset (load 0) -> data/
+python src/downloader.py --all-loads  # all 16 files for the cross-load benchmark
 python src/model.py --epochs 50   # train (leakage-free + early stopping) -> models/bearing_cnn.pth
 python src/model.py --cv 5        # leakage-free 5-fold cross-validation
+python src/model.py --cross-load  # leave-one-load-out cross-load generalization
 python src/evaluate.py            # confusion matrix + per-class F1 -> reports/
 streamlit run src/app.py          # dashboard
 ```

@@ -181,12 +181,42 @@ and trivially separable in a spectrogram — so a perfect score here reflects an
 curve now exposes real overfitting in early epochs (train acc `1.000` while
 validation sits at chance `0.250`) that the old random split completely hid.
 
-The genuinely hard, deployment-relevant benchmark is **cross-load generalization**
-— train on some motor loads, test on an *unseen* load — which is the documented
-next step below.
+### Cross-load generalization — the harder benchmark
+
+The deployment-relevant question is whether the model survives a **change of
+operating condition**. CWRU recorded each fault at four motor loads (0–3 HP,
+~1797 → 1730 RPM), so we can run **leave-one-load-out**: train on three loads and
+test on a load the network *never saw*. Train and test windows now come from
+physically different recordings, so this is a genuine distribution shift, not just
+a clean split.
 
 ```bash
-python src/model.py --cv 5             # leakage-free 5-fold CV
+python src/downloader.py --all-loads   # fetch all 16 files (4 classes x 4 loads)
+python src/model.py --cross-load       # leave-one-load-out benchmark
+```
+
+| Held-out load | Test accuracy | Per-class recall |
+|:---:|:---:|:---|
+| 0 HP | `1.000` | all classes 1.00 |
+| 1 HP | `1.000` | all classes 1.00 |
+| 2 HP | `1.000` | all classes 1.00 |
+| 3 HP | `1.000` | all classes 1.00 |
+| **Mean** | **`1.000 ± 0.000`** | |
+
+The honest — and slightly surprising — result: **load transfer is *not* the
+bottleneck for fault-*type* identification.** It even holds when you train on a
+*single* load and test on the most distant one (`train{0 HP} → test{3 HP} = 0.998`).
+The reason is physical: a bearing's defect frequencies are set by its *geometry*
+(BPFI/BPFO/BSF), which barely moves across this ~4% RPM range, and the per-segment
+min-max normalisation strips away the amplitude differences load *does* cause. What
+survives is the fault-frequency *pattern* — and that's exactly what the CNN keys on.
+
+So the genuinely unsolved benchmarks are **severity grading** (0.007″ vs 0.014″ vs
+0.021″ of the *same* fault) and **real-world noise / multi-fault** signals — not
+load transfer. That reframing is itself a useful solutioning result: it tells you
+where *not* to spend modelling effort.
+
+```bash
 python src/evaluate.py                 # confusion matrix + per-class F1
 python src/model.py --split random     # the leaky baseline, for contrast
 ```
@@ -247,6 +277,23 @@ streamlit run src/app.py
 Pick any test sample and watch it flow through the pipeline — raw signal, FFT,
 spectrogram, and the CNN's live diagnosis with confidence scores.
 
+### 6. Deploy it (Streamlit Community Cloud)
+
+The repo is deploy-ready: the trained weights (630 KB) ship in `models/`, the app
+**auto-downloads the dataset on first run**, and `requirements.txt` pulls the
+CPU-only PyTorch wheel so it installs cleanly on a free CPU host.
+
+1. Push this repo to your own GitHub account.
+2. Go to **[share.streamlit.io](https://share.streamlit.io)** and sign in with GitHub.
+3. **Create app → Deploy a public app from GitHub**, then set:
+   - **Repository:** your fork
+   - **Branch:** `main`
+   - **Main file path:** `src/app.py`
+4. Click **Deploy**. The first build installs deps and downloads the CWRU files
+   (~12 MB); subsequent loads are instant. Inference runs on CPU in the cloud.
+
+> **Live demo:** _add your Streamlit URL here once deployed._
+
 ---
 
 ## 📂 Project Structure
@@ -254,20 +301,22 @@ spectrogram, and the CNN's live diagnosis with confidence scores.
 ```
 predictive-maintenance-pdm/
 ├── src/
-│   ├── downloader.py   # CWRU dataset fetch + dataset registry
-│   ├── preprocess.py   # segmentation, FFT, STFT spectrograms, leakage-free splits
+│   ├── downloader.py   # CWRU dataset fetch + registry (4 classes x 4 motor loads)
+│   ├── preprocess.py   # segmentation, FFT, STFT spectrograms, leakage-free + cross-load splits
 │   ├── features.py     # engineered vibration features + SKF-6205 envelope physics
-│   ├── model.py        # BearingCNN + training (early stopping) + k-fold CV
+│   ├── model.py        # BearingCNN + training (early stopping) + k-fold CV + cross-load benchmark
 │   ├── evaluate.py     # confusion matrix + per-class precision/recall/F1
-│   └── app.py          # Streamlit dashboard
+│   └── app.py          # Streamlit dashboard (auto-downloads data on first run)
 ├── notebooks/
 │   └── 01_eda.ipynb    # exploratory data analysis (Medium-article backbone)
 ├── blog/
 │   └── medium_article.md   # narrative write-up for Medium / a personal blog
+├── .streamlit/
+│   └── config.toml     # dashboard theme (for Streamlit Community Cloud)
 ├── data/               # downloaded .mat files (git-ignored)
-├── models/             # trained weights (git-ignored)
+├── models/             # bearing_cnn.pth — committed so the deploy runs out-of-the-box
 ├── reports/            # generated figures (key ones committed for the README)
-├── requirements.txt        # runtime deps (app + model)
+├── requirements.txt        # runtime deps (CPU-torch, deploy-ready)
 ├── requirements-dev.txt    # + jupyter/seaborn for the EDA notebook
 └── README.md
 ```
@@ -293,12 +342,14 @@ predictive-maintenance-pdm/
 This repo is a *proof of capability*, not a shipped product. In a real energy-sector
 deployment the same pipeline would extend to:
 
+- **Severity grading** across the fault diameters CWRU provides (0.007″–0.028″) —
+  *the* genuinely hard benchmark now that cross-load type-ID is solved (see above):
+  telling a small defect from a large one of the *same* fault type.
+- **Real-world noise & multi-fault** signals — CWRU is a clean single-fault test rig;
+  field data is noisier and faults co-occur.
 - **Streaming inference** on live PLC / IIoT sensor feeds instead of static files.
 - **Remaining Useful Life (RUL)** regression, not just fault classification.
 - **Edge deployment** (ONNX / TensorRT) so inference runs next to the asset.
-- **Severity grading** across the multiple fault diameters CWRU provides (0.007"–0.028").
-- **Cross-load generalization** — the genuinely hard benchmark: train on some motor
-  loads, test on an unseen load (the next milestone in this repo).
 
 ---
 
