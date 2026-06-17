@@ -357,6 +357,11 @@ deployment the same pipeline would extend to:
 - **Remaining Useful Life (RUL)** regression, not just fault classification.
 - **Edge deployment** (ONNX / TensorRT) so inference runs next to the asset.
 
+**Engineering TODO:** add a `pytest` suite that *enforces* the guarantees this project
+currently argues in prose — above all that the leakage-free temporal split shares zero
+windows across train/test — plus checks on the 16-file registry / label map and the
+spectrogram shape, wired into GitHub Actions CI on every push.
+
 ---
 
 ## 📄 Data & License
