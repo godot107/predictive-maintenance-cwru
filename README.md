@@ -5,6 +5,7 @@
 > dashboard.
 
 <p align="left">
+  <a href="https://2vcmmt4mqfryhgfbqw9xmk.streamlit.app/"><img alt="Live Demo" src="https://img.shields.io/badge/Live_Demo-Streamlit_Cloud-FF4B4B?logo=streamlit&logoColor=white"></a>
   <img alt="Python"     src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
   <img alt="PyTorch"    src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white">
   <img alt="Streamlit"  src="https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white">
@@ -12,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="reports/dashboard_fault.png" alt="Streamlit dashboard diagnosing an inner-race bearing fault" width="100%">
+  <a href="https://2vcmmt4mqfryhgfbqw9xmk.streamlit.app/"><img src="reports/dashboard_fault.png" alt="Streamlit dashboard diagnosing an inner-race bearing fault — click to open the live demo" width="100%"></a>
   <br>
   <sub>The Streamlit dashboard running <b>live GPU inference</b>: raw signal → FFT → spectrogram → CNN diagnosis, with plain-language analogies.</sub>
 </p>
@@ -296,7 +297,8 @@ CPU-only PyTorch wheel so it installs cleanly on a free CPU host.
 4. Click **Deploy**. The first build installs deps and downloads the CWRU files
    (~12 MB); subsequent loads are instant. Inference runs on CPU in the cloud.
 
-> **Live demo:** _add your Streamlit URL here once deployed._
+> **🚀 Live demo:** **[Open the dashboard on Streamlit Cloud ▶](https://2vcmmt4mqfryhgfbqw9xmk.streamlit.app/)**
+> _(free tier — if it's been idle it may take ~30 s to wake up)._
 
 ---
 
